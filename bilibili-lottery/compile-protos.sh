@@ -1,0 +1,1 @@
+protoc --proto_path=protos --python_out=protos $(ls protos/*.proto)
