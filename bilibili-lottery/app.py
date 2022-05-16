@@ -3,6 +3,7 @@ import logging
 import math
 import random
 import re
+import zlib
 from urllib.parse import urlparse
 
 import click
@@ -73,8 +74,6 @@ def load_video_info(video_url:str) -> dict:
 
 def load_danmakus(video_page_id:str, video_duration:int, total:int) -> list:
     danmakus = []
-    user_hash_to_id = {}
-
     # 6 mins/segment, 6000 max danmakus/segment
     segment_duration = 6 * 60
     pbar = tqdm(total=total, desc='加载弹幕')
@@ -89,12 +88,9 @@ def load_danmakus(video_page_id:str, video_duration:int, total:int) -> list:
         dm_seg.ParseFromString(pb_resp.content)
         dm_json = json.loads(MessageToJson(dm_seg))
         for elem in dm_json['elems']:
-            if elem['midHash'] not in user_hash_to_id:
-                user_hash_to_id[elem['midHash']] = crc32_cracker.crack(elem['midHash'])
-            uid = user_hash_to_id[elem['midHash']]
             content = elem['content']
-            logger.debug(f'Loaded danmaku: {uid} - {content}')
-            danmakus.append(dict(uid=uid, content='DANMAKU - ' + content))
+            logger.debug(f'Loaded danmaku: {content}')
+            danmakus.append(dict(uidhash=elem['midHash'], content='DANMAKU - ' + content))
             pbar.update(1)
 
     pbar.update(pbar.total - pbar.n) # set pbar to 100%. some danmakus might be unavailable.
@@ -181,16 +177,18 @@ def run(video, lucky_count):
     # combine users
     all_user_contents = {}
     for item in all_danmakus + all_comments:
-        user_contents = all_user_contents.get(item['uid'], {'uname': item.get('uname'), 'contents': []})
+        uidhash = item.get('uidhash') or format(zlib.crc32(item['uid'].encode('utf-8')), 'x')
+        user_contents = all_user_contents.get(uidhash, {'uname': item.get('uname'), 'contents': []})
         user_contents['contents'].append(item['content'])
-        all_user_contents[item['uid']] = user_contents
+        all_user_contents[uidhash] = user_contents
 
     # lucky dog
     for _ in range(lucky_count):
         lucky_dog = random.choice(list(all_user_contents.keys()))
+        uid = crc32_cracker.crack(lucky_dog)
         user_contents = all_user_contents[lucky_dog]
-        uname = user_contents.get('uname') or load_user_info(lucky_dog)['uname']
-        logger.info(f'{uname} https://space.bilibili.com/{lucky_dog} - {user_contents["contents"]}')
+        uname = user_contents.get('uname') or load_user_info(uid)['uname']
+        logger.info(f'{uname} https://space.bilibili.com/{uid} - {user_contents["contents"]}')
 
 
 if __name__ == '__main__':
